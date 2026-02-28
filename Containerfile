@@ -39,6 +39,9 @@ COPY --from=libs /usr/lib64/libstdc++.so* /usr/lib64/
 
 WORKDIR /app
 
+# Cache-bust when fork changes (update this to force rebuild)
+ARG SOURCE_VERSION=2026-02-28
+
 # Download and extract fork source (minimal image has no git/tar, use Python)
 RUN python -c "exec('''\nimport urllib.request, tarfile, io, os\nurl = \"https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz\"\ndata = urllib.request.urlopen(url).read()\ntf = tarfile.open(fileobj=io.BytesIO(data))\nmembers = tf.getmembers()\nprefix = members[0].name\nfor m in members[1:]:\n    m.name = os.path.relpath(m.name, prefix)\n    tf.extract(m, \"/app\")\ntf.close()\n''')"
 
