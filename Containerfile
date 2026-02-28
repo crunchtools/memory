@@ -27,7 +27,7 @@ RUN microdnf install -y libstdc++ && microdnf clean all
 FROM quay.io/hummingbird/python:latest
 
 LABEL name="mcp-memory" \
-      version="0.1.0" \
+      version="0.2.0" \
       summary="MCP Memory Service with persistent semantic memory" \
       description="Persistent memory for AI agents — semantic search, knowledge graph, Cloudflare sync" \
       maintainer="crunchtools.com" \
