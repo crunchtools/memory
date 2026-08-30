@@ -33,7 +33,7 @@ COPY --from=libs /usr/lib64/libstdc++.so* /usr/lib64/
 WORKDIR /app
 
 # Cache-bust when fork changes (update this to force rebuild)
-ARG SOURCE_VERSION=2026-08-30c
+ARG SOURCE_VERSION=2026-08-30d
 
 # Download and extract fork source
 RUN ["python", "-c", "\nimport urllib.request, tarfile, io, os\nurl = 'https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz'\ndata = urllib.request.urlopen(url).read()\ntf = tarfile.open(fileobj=io.BytesIO(data))\nmembers = tf.getmembers()\nprefix = members[0].name\nfor m in members[1:]:\n    m.name = os.path.relpath(m.name, prefix)\n    tf.extract(m, '/app')\ntf.close()\nprint(f'Extracted {len(members)} files')\n"]
@@ -41,8 +41,8 @@ RUN ["python", "-c", "\nimport urllib.request, tarfile, io, os\nurl = 'https://g
 # Install CPU-only PyTorch first (saves ~1.5GB vs full CUDA build)
 RUN ["pip", "install", "--no-cache-dir", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"]
 
-# Install the package and all dependencies
-RUN ["pip", "install", "--no-cache-dir", "-e", "."]
+# Install the package with ONNX embedding support (onnxruntime + tokenizers)
+RUN ["pip", "install", "--no-cache-dir", "-e", ".[sqlite]"]
 
 # Create data directories
 RUN ["python", "-c", "import os; os.makedirs('/app/sqlite_db', exist_ok=True); os.makedirs('/app/backups', exist_ok=True)"]
