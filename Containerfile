@@ -14,7 +14,7 @@ FROM registry.access.redhat.com/hi/python:3.12-builder AS builder
 WORKDIR /app
 
 # Cache-bust when upstream changes
-ARG SOURCE_VERSION=2026-08-30g
+ARG SOURCE_VERSION=2026-08-30h
 
 # Install native libs needed by onnxruntime (libgomp) and numpy (libstdc++)
 USER 0
@@ -26,7 +26,9 @@ RUN curl -sL https://github.com/fatherlinux/mcp-memory-service/archive/refs/head
     | tar xz --strip-components=1 -C /app
 
 # Install CPU-only PyTorch then the package with ONNX embedding support
+# Pin onnxruntime<1.20 — 1.29 segfaults in Hummingbird distroless (PyInit crash)
 RUN pip3.12 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip3.12 install --no-cache-dir "onnxruntime<1.20" && \
     pip3.12 install --no-cache-dir -e ".[sqlite]"
 
 RUN mkdir -p /app/sqlite_db /app/backups
