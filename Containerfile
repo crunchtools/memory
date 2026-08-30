@@ -1,9 +1,5 @@
 # MCP Memory Service Container
-# Wraps fatherlinux/mcp-memory-service (upstream sync, no custom patches)
-# on Hummingbird Python base image.
-#
-# Build:
-#   podman build -t quay.io/crunchtools/memory .
+# Built on Hummingbird Python using proper multi-stage builder pattern.
 #
 # Run (Streamable HTTP — production on lotor):
 #   podman run -d --name mcp-memory -p 127.0.0.1:8765:8765 \
@@ -12,12 +8,37 @@
 #     quay.io/crunchtools/memory \
 #     --streamable-http --sse-host 0.0.0.0 --sse-port 8765
 
-# Stage 1: grab libstdc++ from Fedora (Hummingbird is distroless)
-FROM registry.fedoraproject.org/fedora-minimal:44 AS libs
-RUN microdnf install -y libstdc++ && microdnf clean all
+# Stage 1: builder — has dnf, bash, shadow-utils for installing native deps
+FROM registry.access.redhat.com/hi/python:3.12-builder AS builder
 
-# Stage 2: build on Hummingbird Python (distroless — no shell, all exec-form)
-FROM quay.io/hummingbird/python:latest
+WORKDIR /app
+
+# Cache-bust when upstream changes
+ARG SOURCE_VERSION=2026-08-30e
+
+# Download and extract upstream source
+RUN python -c "\
+import urllib.request, tarfile, io, os; \
+url = 'https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz'; \
+data = urllib.request.urlopen(url).read(); \
+tf = tarfile.open(fileobj=io.BytesIO(data)); \
+members = tf.getmembers(); \
+prefix = members[0].name; \
+[setattr(m, 'name', os.path.relpath(m.name, prefix)) or tf.extract(m, '/app') for m in members[1:]]; \
+tf.close(); \
+print(f'Extracted {len(members)} files')"
+
+# Install native libs needed by onnxruntime (libgomp) and numpy (libstdc++)
+RUN dnf install -y --setopt=install_weak_deps=False libgomp libstdc++ && dnf clean all
+
+# Install CPU-only PyTorch then the package with ONNX embedding support
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -e ".[sqlite]"
+
+RUN mkdir -p /app/sqlite_db /app/backups
+
+# Stage 2: distroless production image
+FROM registry.access.redhat.com/hi/python:3.12
 
 LABEL name="mcp-memory" \
       version="0.3.0" \
@@ -27,25 +48,15 @@ LABEL name="mcp-memory" \
       url="https://github.com/crunchtools/memory" \
       io.k8s.display-name="MCP Memory (CrunchTools)"
 
-# Copy libstdc++ from Fedora stage (needed by numpy, torch, sentence-transformers)
-COPY --from=libs /usr/lib64/libstdc++.so* /usr/lib64/
-
 WORKDIR /app
 
-# Cache-bust when fork changes (update this to force rebuild)
-ARG SOURCE_VERSION=2026-08-30d
+# Copy native libs from builder
+COPY --from=builder /usr/lib64/libgomp.so* /usr/lib64/
+COPY --from=builder /usr/lib64/libstdc++.so* /usr/lib64/
 
-# Download and extract fork source
-RUN ["python", "-c", "\nimport urllib.request, tarfile, io, os\nurl = 'https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz'\ndata = urllib.request.urlopen(url).read()\ntf = tarfile.open(fileobj=io.BytesIO(data))\nmembers = tf.getmembers()\nprefix = members[0].name\nfor m in members[1:]:\n    m.name = os.path.relpath(m.name, prefix)\n    tf.extract(m, '/app')\ntf.close()\nprint(f'Extracted {len(members)} files')\n"]
-
-# Install CPU-only PyTorch first (saves ~1.5GB vs full CUDA build)
-RUN ["pip", "install", "--no-cache-dir", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"]
-
-# Install the package with ONNX embedding support (onnxruntime + tokenizers)
-RUN ["pip", "install", "--no-cache-dir", "-e", ".[sqlite]"]
-
-# Create data directories
-RUN ["python", "-c", "import os; os.makedirs('/app/sqlite_db', exist_ok=True); os.makedirs('/app/backups', exist_ok=True)"]
+# Copy installed Python packages and app source
+COPY --from=builder /tmp/.local /tmp/.local
+COPY --from=builder /app /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
