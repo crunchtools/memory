@@ -14,10 +14,12 @@ FROM registry.access.redhat.com/hi/python:3.12-builder AS builder
 WORKDIR /app
 
 # Cache-bust when upstream changes
-ARG SOURCE_VERSION=2026-08-30f
+ARG SOURCE_VERSION=2026-08-30g
 
 # Install native libs needed by onnxruntime (libgomp) and numpy (libstdc++)
+USER 0
 RUN dnf install -y --setopt=install_weak_deps=False libgomp libstdc++ tar gzip && dnf clean all
+USER 65532
 
 # Download and extract upstream source
 RUN curl -sL https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz \
