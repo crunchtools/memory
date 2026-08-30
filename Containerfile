@@ -1,5 +1,5 @@
 # MCP Memory Service Container
-# Wraps fatherlinux/mcp-memory-service fork (Streamable HTTP + OAuth)
+# Wraps fatherlinux/mcp-memory-service (upstream sync, no custom patches)
 # on Hummingbird Python base image.
 #
 # Build:
@@ -27,7 +27,7 @@ RUN microdnf install -y libstdc++ && microdnf clean all
 FROM quay.io/hummingbird/python:latest
 
 LABEL name="mcp-memory" \
-      version="0.2.0" \
+      version="0.3.0" \
       summary="MCP Memory Service with persistent semantic memory" \
       description="Persistent memory for AI agents — semantic search, knowledge graph, Cloudflare sync" \
       maintainer="crunchtools.com" \
@@ -40,7 +40,7 @@ COPY --from=libs /usr/lib64/libstdc++.so* /usr/lib64/
 WORKDIR /app
 
 # Cache-bust when fork changes (update this to force rebuild)
-ARG SOURCE_VERSION=2026-03-10b
+ARG SOURCE_VERSION=2026-08-30a
 
 # Download and extract fork source (minimal image has no git/tar, use Python)
 RUN python -c "exec('''\nimport urllib.request, tarfile, io, os\nurl = \"https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz\"\ndata = urllib.request.urlopen(url).read()\ntf = tarfile.open(fileobj=io.BytesIO(data))\nmembers = tf.getmembers()\nprefix = members[0].name\nfor m in members[1:]:\n    m.name = os.path.relpath(m.name, prefix)\n    tf.extract(m, \"/app\")\ntf.close()\n''')"
