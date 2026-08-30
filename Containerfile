@@ -14,26 +14,18 @@ FROM registry.access.redhat.com/hi/python:3.12-builder AS builder
 WORKDIR /app
 
 # Cache-bust when upstream changes
-ARG SOURCE_VERSION=2026-08-30e
-
-# Download and extract upstream source
-RUN python -c "\
-import urllib.request, tarfile, io, os; \
-url = 'https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz'; \
-data = urllib.request.urlopen(url).read(); \
-tf = tarfile.open(fileobj=io.BytesIO(data)); \
-members = tf.getmembers(); \
-prefix = members[0].name; \
-[setattr(m, 'name', os.path.relpath(m.name, prefix)) or tf.extract(m, '/app') for m in members[1:]]; \
-tf.close(); \
-print(f'Extracted {len(members)} files')"
+ARG SOURCE_VERSION=2026-08-30f
 
 # Install native libs needed by onnxruntime (libgomp) and numpy (libstdc++)
-RUN dnf install -y --setopt=install_weak_deps=False libgomp libstdc++ && dnf clean all
+RUN dnf install -y --setopt=install_weak_deps=False libgomp libstdc++ tar gzip && dnf clean all
+
+# Download and extract upstream source
+RUN curl -sL https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz \
+    | tar xz --strip-components=1 -C /app
 
 # Install CPU-only PyTorch then the package with ONNX embedding support
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -e ".[sqlite]"
+RUN pip3.12 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip3.12 install --no-cache-dir -e ".[sqlite]"
 
 RUN mkdir -p /app/sqlite_db /app/backups
 
@@ -71,5 +63,5 @@ VOLUME ["/app/sqlite_db", "/app/backups"]
 
 EXPOSE 8765
 
-ENTRYPOINT ["python", "-m", "mcp_memory_service.cli.main", "server"]
+ENTRYPOINT ["python3.12", "-m", "mcp_memory_service.cli.main", "server"]
 CMD ["--sse", "--sse-host", "0.0.0.0", "--sse-port", "8765"]
