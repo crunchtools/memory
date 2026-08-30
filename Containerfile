@@ -12,11 +12,11 @@
 #     quay.io/crunchtools/memory \
 #     --streamable-http --sse-host 0.0.0.0 --sse-port 8765
 
-# Stage 1: grab libstdc++ and bash from Fedora (Hummingbird is distroless)
+# Stage 1: grab libstdc++ from Fedora (Hummingbird is distroless)
 FROM registry.fedoraproject.org/fedora-minimal:44 AS libs
-RUN microdnf install -y libstdc++ bash coreutils && microdnf clean all
+RUN microdnf install -y libstdc++ && microdnf clean all
 
-# Stage 2: build on Hummingbird Python
+# Stage 2: build on Hummingbird Python (distroless — no shell, all exec-form)
 FROM quay.io/hummingbird/python:latest
 
 LABEL name="mcp-memory" \
@@ -27,30 +27,25 @@ LABEL name="mcp-memory" \
       url="https://github.com/crunchtools/memory" \
       io.k8s.display-name="MCP Memory (CrunchTools)"
 
-# Copy libstdc++ and bash from Fedora stage
+# Copy libstdc++ from Fedora stage (needed by numpy, torch, sentence-transformers)
 COPY --from=libs /usr/lib64/libstdc++.so* /usr/lib64/
-COPY --from=libs /usr/bin/bash /usr/bin/bash
-COPY --from=libs /usr/bin/mkdir /usr/bin/mkdir
-
-# Symlink sh -> bash so shell-form RUN works
-RUN ["python", "-c", "import os; os.symlink('/usr/bin/bash', '/bin/sh')"]
 
 WORKDIR /app
 
 # Cache-bust when fork changes (update this to force rebuild)
-ARG SOURCE_VERSION=2026-08-30b
+ARG SOURCE_VERSION=2026-08-30c
 
 # Download and extract fork source
 RUN ["python", "-c", "\nimport urllib.request, tarfile, io, os\nurl = 'https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz'\ndata = urllib.request.urlopen(url).read()\ntf = tarfile.open(fileobj=io.BytesIO(data))\nmembers = tf.getmembers()\nprefix = members[0].name\nfor m in members[1:]:\n    m.name = os.path.relpath(m.name, prefix)\n    tf.extract(m, '/app')\ntf.close()\nprint(f'Extracted {len(members)} files')\n"]
 
 # Install CPU-only PyTorch first (saves ~1.5GB vs full CUDA build)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN ["pip", "install", "--no-cache-dir", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"]
 
 # Install the package and all dependencies
-RUN pip install --no-cache-dir -e .
+RUN ["pip", "install", "--no-cache-dir", "-e", "."]
 
 # Create data directories
-RUN mkdir -p /app/sqlite_db /app/backups
+RUN ["python", "-c", "import os; os.makedirs('/app/sqlite_db', exist_ok=True); os.makedirs('/app/backups', exist_ok=True)"]
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
