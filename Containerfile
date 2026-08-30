@@ -5,23 +5,16 @@
 # Build:
 #   podman build -t quay.io/crunchtools/memory .
 #
-# Run (SSE - local Claude Code):
+# Run (Streamable HTTP — production on lotor):
 #   podman run -d --name mcp-memory -p 127.0.0.1:8765:8765 \
-#     --env-file ~/.config/mcp-env/mcp-memory.env \
-#     -v ~/.local/share/mcp-memory:/app/sqlite_db:Z \
+#     --env-file /srv/mcp-memory.crunchtools.com/config/mcp-memory.env \
+#     -v /srv/mcp-memory.crunchtools.com/data:/app/sqlite_db:Z \
 #     quay.io/crunchtools/memory \
-#     --sse --sse-host 0.0.0.0 --sse-port 8765
-#
-# Run (Streamable HTTP + OAuth - remote Claude.ai):
-#   podman run -d --name mcp-memory -p 127.0.0.1:8765:8765 \
-#     --env-file /srv/memory.crunchtools.com/config/mcp-memory.env \
-#     -v /srv/memory.crunchtools.com/data:/app/sqlite_db:Z \
-#     quay.io/crunchtools/memory \
-#     --streamable-http --streamable-http-host 0.0.0.0 --streamable-http-port 8765
+#     --streamable-http --sse-host 0.0.0.0 --sse-port 8765
 
-# Stage 1: grab libstdc++ from Fedora (Hummingbird is too minimal)
+# Stage 1: grab libstdc++ and bash from Fedora (Hummingbird is distroless)
 FROM registry.fedoraproject.org/fedora-minimal:44 AS libs
-RUN microdnf install -y libstdc++ && microdnf clean all
+RUN microdnf install -y libstdc++ bash coreutils && microdnf clean all
 
 # Stage 2: build on Hummingbird Python
 FROM quay.io/hummingbird/python:latest
@@ -34,16 +27,21 @@ LABEL name="mcp-memory" \
       url="https://github.com/crunchtools/memory" \
       io.k8s.display-name="MCP Memory (CrunchTools)"
 
-# Copy libstdc++ from Fedora stage (needed by numpy, torch, sentence-transformers)
+# Copy libstdc++ and bash from Fedora stage
 COPY --from=libs /usr/lib64/libstdc++.so* /usr/lib64/
+COPY --from=libs /usr/bin/bash /usr/bin/bash
+COPY --from=libs /usr/bin/mkdir /usr/bin/mkdir
+
+# Symlink sh -> bash so shell-form RUN works
+RUN ["python", "-c", "import os; os.symlink('/usr/bin/bash', '/bin/sh')"]
 
 WORKDIR /app
 
 # Cache-bust when fork changes (update this to force rebuild)
-ARG SOURCE_VERSION=2026-08-30a
+ARG SOURCE_VERSION=2026-08-30b
 
-# Download and extract fork source (minimal image has no git/tar, use Python)
-RUN python -c "exec('''\nimport urllib.request, tarfile, io, os\nurl = \"https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz\"\ndata = urllib.request.urlopen(url).read()\ntf = tarfile.open(fileobj=io.BytesIO(data))\nmembers = tf.getmembers()\nprefix = members[0].name\nfor m in members[1:]:\n    m.name = os.path.relpath(m.name, prefix)\n    tf.extract(m, \"/app\")\ntf.close()\n''')"
+# Download and extract fork source
+RUN ["python", "-c", "\nimport urllib.request, tarfile, io, os\nurl = 'https://github.com/fatherlinux/mcp-memory-service/archive/refs/heads/main.tar.gz'\ndata = urllib.request.urlopen(url).read()\ntf = tarfile.open(fileobj=io.BytesIO(data))\nmembers = tf.getmembers()\nprefix = members[0].name\nfor m in members[1:]:\n    m.name = os.path.relpath(m.name, prefix)\n    tf.extract(m, '/app')\ntf.close()\nprint(f'Extracted {len(members)} files')\n"]
 
 # Install CPU-only PyTorch first (saves ~1.5GB vs full CUDA build)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
@@ -54,7 +52,6 @@ RUN pip install --no-cache-dir -e .
 # Create data directories
 RUN mkdir -p /app/sqlite_db /app/backups
 
-# Ensure pip user-install binaries are on PATH
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     PATH="/tmp/.local/bin:${PATH}" \
@@ -68,7 +65,5 @@ VOLUME ["/app/sqlite_db", "/app/backups"]
 
 EXPOSE 8765
 
-# Default: SSE transport on port 8765
-# Override at runtime with --streamable-http for OAuth mode
 ENTRYPOINT ["python", "-m", "mcp_memory_service.cli.main", "server"]
 CMD ["--sse", "--sse-host", "0.0.0.0", "--sse-port", "8765"]
