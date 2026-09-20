@@ -32,8 +32,8 @@ Claude Code config:
 ```bash
 podman run -d --name mcp-memory \
   -p 127.0.0.1:8765:8765 \
-  --env-file /srv/memory.crunchtools.com/config/mcp-memory.env \
-  -v /srv/memory.crunchtools.com/data:/app/sqlite_db:Z \
+  --env-file /srv/<service>/config/mcp-memory.env \
+  -v /srv/<service>/data:/app/sqlite_db:Z \
   quay.io/crunchtools/memory \
   --streamable-http --streamable-http-host 0.0.0.0 --streamable-http-port 8765
 ```
