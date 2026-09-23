@@ -9,7 +9,7 @@
 #     --streamable-http --sse-host 0.0.0.0 --sse-port 8765
 
 # Stage 1: builder — has dnf, bash, shadow-utils for installing native deps
-FROM registry.access.redhat.com/hi/python:3.12-builder AS builder
+FROM registry.access.redhat.com/hi/python:3.14-builder AS builder
 
 WORKDIR /app
 
@@ -48,7 +48,7 @@ RUN pip3.12 install --no-cache-dir torch --index-url https://download.pytorch.or
 RUN mkdir -p /app/sqlite_db /app/backups
 
 # Stage 2: distroless production image
-FROM registry.access.redhat.com/hi/python:3.12
+FROM registry.access.redhat.com/hi/python:3.14
 
 LABEL name="mcp-memory" \
       version="0.3.0" \
