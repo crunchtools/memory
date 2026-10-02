@@ -42,8 +42,8 @@ RUN curl -sL https://github.com/fatherlinux/mcp-memory-service/archive/refs/head
 # distroless segfault, and it held the embedding runtime nine minor versions
 # back. The populated /etc/machine-id above and ORT_DISABLE_TELEMETRY below
 # each independently prevent that crash, verified against 1.29.0.
-RUN pip3.12 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip3.12 install --no-cache-dir -e ".[sqlite]"
+RUN pip3.14 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip3.14 install --no-cache-dir -e ".[sqlite]"
 
 RUN mkdir -p /app/sqlite_db /app/backups
 
@@ -91,5 +91,5 @@ VOLUME ["/app/sqlite_db", "/app/backups"]
 
 EXPOSE 8765
 
-ENTRYPOINT ["python3.12", "-m", "mcp_memory_service.cli.main", "server"]
+ENTRYPOINT ["python3.14", "-m", "mcp_memory_service.cli.main", "server"]
 CMD ["--sse", "--sse-host", "0.0.0.0", "--sse-port", "8765"]
