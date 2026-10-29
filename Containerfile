@@ -51,7 +51,7 @@ RUN mkdir -p /app/sqlite_db /app/backups
 FROM registry.access.redhat.com/hi/python:3.14
 
 LABEL name="mcp-memory" \
-      version="1.1.0" \
+      version="1.1.1" \
       summary="MCP Memory Service with persistent semantic memory" \
       description="Persistent memory for AI agents — semantic search, knowledge graph, Cloudflare sync" \
       maintainer="crunchtools.com" \
@@ -79,6 +79,10 @@ ENV PYTHONUNBUFFERED=1 \
     MCP_SSE_HOST=0.0.0.0 \
     MCP_SSE_PORT=8765
 
+# pbs on the host backs up sqlite_vec.db with sqlite3 .backup. The in-app
+# scheduler only runs in --http mode and would write to the ephemeral layer.
+ENV MCP_BACKUP_ENABLED=false
+
 # Second, independent guard against the HUM-6564 crash, and appropriate on its
 # own merits: left enabled, onnxruntime's init reads /etc/machine-id and
 # /etc/os-release, writes /tmp/mat-debug-1.log and creates a session file at
@@ -87,7 +91,7 @@ ENV HF_HUB_DISABLE_TELEMETRY=1 \
     ORT_DISABLE_TELEMETRY=1 \
     DO_NOT_TRACK=1
 
-VOLUME ["/app/sqlite_db", "/app/backups"]
+VOLUME ["/app/sqlite_db"]
 
 EXPOSE 8765
 

@@ -1,6 +1,6 @@
 # memory Constitution
 
-> **Version:** 1.0.0
+> **Version:** 1.0.1
 > **Ratified:** 2026-10-02
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.27.0
@@ -33,8 +33,10 @@ holds only the Containerfile, the workflows and this file.
   backend), MCP_API_KEY (Streamable HTTP gate); backend chosen by
   MCP_MEMORY_STORAGE_BACKEND
 
-The SQLite database and backups live in the `/app/sqlite_db` and
-`/app/backups` volumes, bind-mounted from the host. The image holds the
+The SQLite database lives in the `/app/sqlite_db` volume, bind-mounted from
+the host. Backups are the host's job (pbs stages it with `sqlite3 .backup`),
+so the in-app scheduler is off (`MCP_BACKUP_ENABLED=false`) and
+`/app/backups` is not a volume. The image holds the
 whole memory corpus at runtime, so telemetry is off
 (`HF_HUB_DISABLE_TELEMETRY`, `ORT_DISABLE_TELEMETRY`, `DO_NOT_TRACK`). One
 authoritative instance; Cloudflare is a backup, not a peer.
@@ -71,3 +73,4 @@ file still crashes; keep it populated.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-10-02 | Initial manifest under constitution v1.18.0 |
+| 1.0.1 | 2026-10-28 | Backups owned by the host; `/app/backups` volume dropped (RT #1537) |
