@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-28
+
+### Fixed
+
+- `/app/backups` is no longer a volume, and `MCP_BACKUP_ENABLED=false` turns
+  off the in-app backup scheduler. The scheduler only starts in `--http` mode,
+  so with `--rm` and `--streamable-http` podman created an empty anonymous
+  volume on every start and threw it away on stop. Host backups (pbs,
+  `sqlite3 .backup`) are the only backup path (RT #1537).
+
 ## [1.1.0] - 2026-10-22
 
 ### Changed
