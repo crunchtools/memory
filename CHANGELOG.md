@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-10
+
+### Fixed
+
+- The builder stage no longer does a fresh pip resolve against a moving
+  `main`. Upstream is now pinned to commit `80c97785bf552ee50f82e5d5088bed5bdccb7704`
+  (RT #1564); its committed `uv.lock` is exported for the `sqlite` extra with
+  `uv export --frozen --no-dev --no-emit-project --extra sqlite` and installed
+  with `--no-deps`, then the project itself is installed `--no-deps` on top of
+  that locked set. Torch isn't in the `sqlite` extra's lock closure (upstream
+  keeps it under the separate `[ml]` extra), so it is still installed
+  explicitly from PyTorch's CPU index, but now pinned to `torch==2.14.1` --
+  the exact version named in upstream's lock for `[ml]` -- with `--no-deps`.
+
 ## [1.1.1] - 2026-10-28
 
 ### Fixed
