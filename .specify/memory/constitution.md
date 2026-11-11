@@ -3,7 +3,7 @@
 > **Version:** 1.0.1
 > **Ratified:** 2026-10-02
 > **Status:** Active
-> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.31.0
+> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.39.1
 > **Profile:** Forked MCP Server
 
 This file holds what is specific to the memory image. The fleet rules and the
@@ -58,8 +58,8 @@ file still crashes; keep it populated.
 ## Deviations
 
 - **Image name and registries.** The image is `quay.io/crunchtools/memory`,
-  not `mcp-memory`, and `container.yml` also pushes `ghcr.io/crunchtools/memory`.
-  Both predate the profile; renaming would break running deployments.
+  not `mcp-memory`; the name predates the profile and renaming would break
+  running deployments. Quay.io is the only registry.
 - **Base image.** The Hummingbird Python image is pulled from
   `registry.access.redhat.com/hi/python:3.14` (builder and runtime), pinned
   to Python 3.14, rather than `quay.io/hummingbird/python:latest`. The builder
