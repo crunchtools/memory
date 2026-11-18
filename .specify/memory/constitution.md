@@ -78,9 +78,16 @@ it cannot create it. Neither may be dropped without re-testing a real boot.
   (`MCP_SYNC_SCHEDULE`, ADR-0028) both live in the FastAPI app, and
   `cli/main.py` starts that app only under `--http`; every other transport
   runs the bare MCP server, where the endpoints 404 and the scheduler never
-  starts. `--http` also mounts the MCP-over-HTTP router, so a syncing
-  deployment serves MCP and REST from the one process. The image's default
-  CMD is still SSE, which does not sync.
+  starts.
+
+  A syncing instance is therefore its own thing, not the fleet's MCP
+  endpoint. `--http` binds `MCP_HTTP_HOST` and `MCP_HTTP_PORT` (defaults
+  `127.0.0.1:8000`) and ignores `--sse-host`/`--sse-port` entirely, so both
+  must be set explicitly. It does mount an MCP router, but that is a
+  JSON-only shim pinned to protocol `2024-11-05` — not the Streamable HTTP
+  transport the fleet's gateway speaks. Fleet clients stay on
+  `--streamable-http`, which is what the deployed units pass and which does
+  not sync. The image's own default CMD is `--sse`.
 
 ## History
 

@@ -97,7 +97,7 @@ FROM registry.access.redhat.com/hi/python:3.14
 LABEL name="mcp-memory" \
       version="1.1.2" \
       summary="MCP Memory Service with persistent semantic memory" \
-      description="Persistent memory for AI agents — semantic search, knowledge graph, Cloudflare sync" \
+      description="Persistent memory for AI agents — semantic search, knowledge graph, HLC peer sync" \
       maintainer="crunchtools.com" \
       url="https://github.com/crunchtools/memory" \
       io.k8s.display-name="MCP Memory (CrunchTools)"

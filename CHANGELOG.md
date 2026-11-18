@@ -33,9 +33,16 @@ All notable changes to this project are documented here. The format follows
   Both the control plane and that scheduler live in the FastAPI app, and the
   CLI only starts that app under `--http` — under `--sse`,
   `--streamable-http` or stdio the server runs the bare MCP path, where
-  `/api/sync/*` 404s and the scheduler never starts. A deployment that syncs
-  therefore runs `--http`, which also mounts the MCP-over-HTTP router, so one
-  process still serves both.
+  `/api/sync/*` 404s and the scheduler never starts.
+- A syncing instance runs `--http` with `MCP_HTTP_HOST` and `MCP_HTTP_PORT`
+  set, and is **not** the fleet's MCP endpoint. `--http` binds those two
+  variables (defaults `127.0.0.1:8000`) and ignores `--sse-host` and
+  `--sse-port`, so leaving them unset silently yields a loopback-only server
+  on the wrong port. The MCP router it mounts is a JSON-only shim pinned to
+  protocol `2024-11-05`, not the Streamable HTTP transport the gateway
+  speaks, so fleet clients stay on `--streamable-http` as the deployed units
+  already pass. Sync and fleet traffic are separate instances, not one
+  process serving both.
 - The build takes **upstream direct** instead of going through the
   [fatherlinux](https://github.com/fatherlinux/mcp-memory-service) fork. That
   fork existed to carry one patch — the hybrid health check reporting
