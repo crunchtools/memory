@@ -96,7 +96,7 @@ RUN pip3.14 install --no-cache-dir --no-deps torch==2.15.0 \
 # already installed, locked, above.
 RUN pip3.14 install --no-cache-dir --no-deps -e ".[sqlite]"
 
-# /app/state backs MCP_MEMORY_BASE_DIR (set in stage 2). Created here, under
+# /app/state backs MCP_MEMORY_BASE_DIR and HOME (set in stage 2). Created here, under
 # the /app that is chowned to 65532 above, because stage 2 is distroless and
 # cannot RUN mkdir; `COPY --from=builder /app /app` carries it and its
 # ownership across.
@@ -126,21 +126,27 @@ COPY --from=builder /app /app
 # Keeps onnxruntime's telemetry off its shell-based fallback — see stage 1
 COPY --from=builder /etc/machine-id.seed /etc/machine-id
 
-# MCP_MEMORY_BASE_DIR is set EXPLICITLY. Unset, config/base.py falls back to
-# $HOME/.local/share/mcp-memory, and HOME is /tmp here, so the base dir landed
-# inside /tmp/.local -- which the image once created for the pip --user install
-# (it now lives in /opt/memory, see stage 1) and which belonged to root, mode
-# 0755. That only ever worked because some dependency's install happened to
-# leave a 65532-owned /tmp/.local/share behind; the 12.11.0 dependency set does
-# not, and config/base.py calls
-# sys.exit(1) when it cannot create the directory, so the server died at import
-# with "Fatal error initializing paths" (RT#1655). /app/state is owned by the
-# runtime user by construction and does not depend on HOME or on pip's layout.
-# It is deliberately NOT a volume: BASE_DIR holds the ONNX model cache and the
-# consolidation archive, which were ephemeral before this change and stay so.
+# MCP_MEMORY_BASE_DIR and HOME both point at /app/state, owned by the runtime
+# user by construction (stage 1), and neither depends on pip's layout.
+#
+# BASE_DIR: unset, config/base.py falls back to $HOME/.local/share/mcp-memory.
+# With the base image's HOME=/tmp that landed in the root-owned /tmp/.local the
+# pip --user install used to create, and config/base.py sys.exit(1)s when it
+# cannot create the directory: "Fatal error initializing paths" (RT#1655).
+# BASE_DIR holds the consolidation archive.
+#
+# HOME: upstream's ONNX model cache is Path.home()/.cache/mcp_memory
+# (embeddings/onnx_embeddings.py), and the Hugging Face cache follows HOME too
+# -- not BASE_DIR. Under HOME=/tmp that put ~170 MB of model on the house
+# 256m /tmp tmpfs, and a Hugging Face fallback download could overflow it
+# (#43). /app/state keeps it on the container's own layer.
+#
+# /app/state is deliberately NOT a volume: the model cache and the archive were
+# ephemeral before and stay so.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     PYTHONUSERBASE=/opt/memory \
+    HOME=/app/state \
     PATH="/opt/memory/bin:${PATH}" \
     MCP_MEMORY_BASE_DIR=/app/state \
     MCP_MEMORY_SQLITE_PATH=/app/sqlite_db/memory.db \
