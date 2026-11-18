@@ -47,6 +47,17 @@ RUN tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.seed
 # rather than relying on it surviving the USER 0 block.
 RUN chown -R 65532:0 /app
 
+# The Python packages install into /opt/memory, not pip's default user base.
+# The builder runs as 65532 with HOME=/tmp, so `pip install` falls back to a
+# --user install under $HOME/.local -- i.e. /tmp/.local, ~1.07 GB of it. The
+# runtime stage then carried that into /tmp, and the house
+# `Tmpfs=/tmp:rw,nosuid,size=256m` mounts over it: the container died at
+# create with "No space left on device" (#43). PYTHONUSERBASE moves the user
+# base out of /tmp in both stages; site.py honours it at runtime, so nothing
+# else changes. Needs root to create, so it lives here.
+RUN mkdir -p /opt/memory && chown 65532:0 /opt/memory
+ENV PYTHONUSERBASE=/opt/memory
+
 USER 65532
 
 # Download and extract upstream source at the pinned commit
@@ -85,7 +96,7 @@ RUN pip3.14 install --no-cache-dir --no-deps torch==2.15.0 \
 # already installed, locked, above.
 RUN pip3.14 install --no-cache-dir --no-deps -e ".[sqlite]"
 
-# /app/state backs MCP_MEMORY_BASE_DIR (set in stage 2). Created here, under
+# /app/state backs MCP_MEMORY_BASE_DIR and HOME (set in stage 2). Created here, under
 # the /app that is chowned to 65532 above, because stage 2 is distroless and
 # cannot RUN mkdir; `COPY --from=builder /app /app` carries it and its
 # ownership across.
@@ -109,26 +120,34 @@ COPY --from=builder /usr/lib64/libgomp.so* /usr/lib64/
 COPY --from=builder /usr/lib64/libstdc++.so* /usr/lib64/
 
 # Copy installed Python packages and app source
-COPY --from=builder /tmp/.local /tmp/.local
+COPY --from=builder /opt/memory /opt/memory
 COPY --from=builder /app /app
 
 # Keeps onnxruntime's telemetry off its shell-based fallback — see stage 1
 COPY --from=builder /etc/machine-id.seed /etc/machine-id
 
-# MCP_MEMORY_BASE_DIR is set EXPLICITLY. Unset, config/base.py falls back to
-# $HOME/.local/share/mcp-memory, and HOME is /tmp here, so the base dir landed
-# inside /tmp/.local -- which this image creates for the pip --user install and
-# which belongs to root, mode 0755. That only ever worked because some
-# dependency's install happened to leave a 65532-owned /tmp/.local/share
-# behind; the 12.11.0 dependency set does not, and config/base.py calls
-# sys.exit(1) when it cannot create the directory, so the server died at import
-# with "Fatal error initializing paths" (RT#1655). /app/state is owned by the
-# runtime user by construction and does not depend on HOME or on pip's layout.
-# It is deliberately NOT a volume: BASE_DIR holds the ONNX model cache and the
-# consolidation archive, which were ephemeral before this change and stay so.
+# MCP_MEMORY_BASE_DIR and HOME both point at /app/state, owned by the runtime
+# user by construction (stage 1), and neither depends on pip's layout.
+#
+# BASE_DIR: unset, config/base.py falls back to $HOME/.local/share/mcp-memory.
+# With the base image's HOME=/tmp that landed in the root-owned /tmp/.local the
+# pip --user install used to create, and config/base.py sys.exit(1)s when it
+# cannot create the directory: "Fatal error initializing paths" (RT#1655).
+# BASE_DIR holds the consolidation archive.
+#
+# HOME: upstream's ONNX model cache is Path.home()/.cache/mcp_memory
+# (embeddings/onnx_embeddings.py), and the Hugging Face cache follows HOME too
+# -- not BASE_DIR. Under HOME=/tmp that put ~170 MB of model on the house
+# 256m /tmp tmpfs, and a Hugging Face fallback download could overflow it
+# (#43). /app/state keeps it on the container's own layer.
+#
+# /app/state is deliberately NOT a volume: the model cache and the archive were
+# ephemeral before and stay so.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
-    PATH="/tmp/.local/bin:${PATH}" \
+    PYTHONUSERBASE=/opt/memory \
+    HOME=/app/state \
+    PATH="/opt/memory/bin:${PATH}" \
     MCP_MEMORY_BASE_DIR=/app/state \
     MCP_MEMORY_SQLITE_PATH=/app/sqlite_db/memory.db \
     MCP_MEMORY_BACKUPS_PATH=/app/backups \

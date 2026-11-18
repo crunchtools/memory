@@ -22,6 +22,10 @@ jobs:
       boot: mcp
       boot-cmd: "--storage-backend sqlite_vec"
       boot-timeout: 240
+      # The house quadlets mount /tmp as a 256m tmpfs; boot under the same (#43).
+      boot-run-args: "--tmpfs /tmp:rw,nosuid,size=256m"
+      # ...and the HTTP API, under that tmpfs, must answer /api/health.
+      contract-test: tests/container/tmpfs_health.sh
     secrets:
       QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
       QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
