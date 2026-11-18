@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-18
+
+### Fixed
+
+- The image's `version` LABEL now matches the release. `v1.2.0` was tagged on
+  the feature merge directly, with no `chore/release-1.2.0` PR to roll this
+  file's Unreleased section or move the version strings, so the published
+  `v1.2.0` image went out labelled `1.1.2`. Only the label was wrong — that
+  image's contents are the intended v12.11.0 build. The 1.2.0 entry below is
+  the section that merge should have created.
+
+## [1.2.0] - 2026-11-18
+
 ### Fixed
 
 - `MCP_MEMORY_BASE_DIR` is now set explicitly to `/app/state`, a directory
