@@ -1,9 +1,9 @@
 # MCP Memory Service Container
 # Built on Hummingbird Python using proper multi-stage builder pattern.
 #
-# Run (Streamable HTTP — production on lotor):
+# Run (Streamable HTTP — production on gloval):
 #   podman run -d --name mcp-memory -p 127.0.0.1:8765:8765 \
-#     --env-file /srv/mcp-memory.crunchtools.com/config/mcp-memory.env \
+#     --env-file /run/srv-secrets/mcp-memory.crunchtools.com/mcp-memory.env \
 #     -v /srv/mcp-memory.crunchtools.com/data:/app/sqlite_db:Z \
 #     quay.io/crunchtools/memory \
 #     --streamable-http --sse-host 0.0.0.0 --sse-port 8765
@@ -14,10 +14,12 @@ FROM registry.access.redhat.com/hi/python:3.14-builder AS builder
 WORKDIR /app
 
 # Pin upstream to a specific commit (RT#1564) -- `main` is drift. Bump this
-# deliberately when upstream needs to move; pair it with re-exporting
-# requirements-sqlite.txt and re-checking the torch pin below.
-# https://github.com/fatherlinux/mcp-memory-service/commit/80c97785bf552ee50f82e5d5088bed5bdccb7704
-ARG UPSTREAM_COMMIT=80c97785bf552ee50f82e5d5088bed5bdccb7704
+# deliberately when upstream needs to move; pair it with re-checking the torch
+# pin below. This is doobidoo's v12.11.0 tag: the fatherlinux fork's only
+# patch is now carried upstream verbatim, so the build takes upstream direct
+# (RT#1655).
+# https://github.com/doobidoo/mcp-memory-service/releases/tag/v12.11.0
+ARG UPSTREAM_COMMIT=112d881c03268fe791d3a7f3d5e277cbe56174b2
 
 # Install native libs needed by onnxruntime (libgomp) and numpy (libstdc++),
 # and uv to export upstream's lock. Both run as root so `uv` lands in
@@ -48,7 +50,7 @@ RUN chown -R 65532:0 /app
 USER 65532
 
 # Download and extract upstream source at the pinned commit
-RUN curl -sL https://github.com/fatherlinux/mcp-memory-service/archive/${UPSTREAM_COMMIT}.tar.gz \
+RUN curl -sL https://github.com/doobidoo/mcp-memory-service/archive/${UPSTREAM_COMMIT}.tar.gz \
     | tar xz --strip-components=1 -C /app
 
 # Export upstream's committed uv.lock for the sqlite extra and install that
@@ -57,7 +59,7 @@ RUN curl -sL https://github.com/fatherlinux/mcp-memory-service/archive/${UPSTREA
 # was a workaround for the distroless segfault, and it held the embedding
 # runtime nine minor versions back. The populated /etc/machine-id above and
 # ORT_DISABLE_TELEMETRY below each independently prevent that crash, verified
-# against 1.29.0; the lock at this commit resolves onnxruntime==1.24.3 for
+# against 1.29.0; the lock at this commit resolves onnxruntime==1.31.1 for
 # Python 3.14.
 RUN uv export --frozen --no-dev --no-emit-project --extra sqlite \
       --format requirements-txt -o /tmp/requirements.txt && \
@@ -67,7 +69,7 @@ RUN uv export --frozen --no-dev --no-emit-project --extra sqlite \
 # the separate [ml] extra), so `uv export --extra sqlite` never names it --
 # there is nothing to lock it against. It is still installed here because the
 # image needs the CPU wheel from PyTorch's own index rather than the
-# CUDA-pulling PyPI build upstream's uv.lock resolves for [ml] (torch==2.14.1,
+# CUDA-pulling PyPI build upstream's uv.lock resolves for [ml] (torch==2.15.0,
 # with cuda-bindings/cuda-toolkit/nvidia-* deps). Pin to that same version so
 # it tracks upstream's lock, take it from the CPU index, and use --no-deps:
 # the CPU wheel's own runtime deps (filelock, fsspec, sympy, typing-extensions)
@@ -76,14 +78,18 @@ RUN uv export --frozen --no-dev --no-emit-project --extra sqlite \
 # features) are not required at import time for the ONNX embedding path this
 # image actually uses -- verified against this build. Bump this together with
 # the UPSTREAM_COMMIT pin above.
-RUN pip3.14 install --no-cache-dir --no-deps torch==2.14.1 \
+RUN pip3.14 install --no-cache-dir --no-deps torch==2.15.0 \
       --index-url https://download.pytorch.org/whl/cpu
 
 # Install the project itself last, --no-deps: its dependency closure was
 # already installed, locked, above.
 RUN pip3.14 install --no-cache-dir --no-deps -e ".[sqlite]"
 
-RUN mkdir -p /app/sqlite_db /app/backups
+# /app/state backs MCP_MEMORY_BASE_DIR (set in stage 2). Created here, under
+# the /app that is chowned to 65532 above, because stage 2 is distroless and
+# cannot RUN mkdir; `COPY --from=builder /app /app` carries it and its
+# ownership across.
+RUN mkdir -p /app/sqlite_db /app/backups /app/state
 
 # Stage 2: distroless production image
 FROM registry.access.redhat.com/hi/python:3.14
@@ -91,7 +97,7 @@ FROM registry.access.redhat.com/hi/python:3.14
 LABEL name="mcp-memory" \
       version="1.1.2" \
       summary="MCP Memory Service with persistent semantic memory" \
-      description="Persistent memory for AI agents — semantic search, knowledge graph, Cloudflare sync" \
+      description="Persistent memory for AI agents — semantic search, knowledge graph, HLC peer sync" \
       maintainer="crunchtools.com" \
       url="https://github.com/crunchtools/memory" \
       io.k8s.display-name="MCP Memory (CrunchTools)"
@@ -109,9 +115,21 @@ COPY --from=builder /app /app
 # Keeps onnxruntime's telemetry off its shell-based fallback — see stage 1
 COPY --from=builder /etc/machine-id.seed /etc/machine-id
 
+# MCP_MEMORY_BASE_DIR is set EXPLICITLY. Unset, config/base.py falls back to
+# $HOME/.local/share/mcp-memory, and HOME is /tmp here, so the base dir landed
+# inside /tmp/.local -- which this image creates for the pip --user install and
+# which belongs to root, mode 0755. That only ever worked because some
+# dependency's install happened to leave a 65532-owned /tmp/.local/share
+# behind; the 12.11.0 dependency set does not, and config/base.py calls
+# sys.exit(1) when it cannot create the directory, so the server died at import
+# with "Fatal error initializing paths" (RT#1655). /app/state is owned by the
+# runtime user by construction and does not depend on HOME or on pip's layout.
+# It is deliberately NOT a volume: BASE_DIR holds the ONNX model cache and the
+# consolidation archive, which were ephemeral before this change and stay so.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     PATH="/tmp/.local/bin:${PATH}" \
+    MCP_MEMORY_BASE_DIR=/app/state \
     MCP_MEMORY_SQLITE_PATH=/app/sqlite_db/memory.db \
     MCP_MEMORY_BACKUPS_PATH=/app/backups \
     MCP_SSE_HOST=0.0.0.0 \

@@ -1,6 +1,6 @@
 # memory Constitution
 
-> **Version:** 1.0.1
+> **Version:** 1.1.0
 > **Ratified:** 2026-10-02
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.46.0
@@ -12,13 +12,14 @@ against this repo's files by `constitution.yml`. They are not restated here.
 
 ## Upstream
 
-- **Source:** https://github.com/doobidoo/mcp-memory-service, built from the
-  `main` branch of the [fatherlinux/mcp-memory-service](https://github.com/fatherlinux/mcp-memory-service)
-  fork
+- **Source:** https://github.com/doobidoo/mcp-memory-service, built direct from
+  upstream — no fork in the build path
 - **License:** Apache-2.0
-- **Forked at:** fork rebased onto upstream v12.2.1+ on 2026-10-22; the
-  Containerfile downloads the fork's `main` tarball, and `SOURCE_VERSION` is
-  bumped to force a rebuild when it moves
+- **Pinned at:** upstream v12.11.0
+  (`112d881c03268fe791d3a7f3d5e277cbe56174b2`), named by `UPSTREAM_COMMIT` in
+  the Containerfile. The [fatherlinux](https://github.com/fatherlinux/mcp-memory-service)
+  fork was retired from the build in RT #1655 once upstream carried its only
+  patch; it remains as history, not as a source
 
 This is a packaging repo: the source is fetched at build time, so the repo
 holds only the Containerfile, the workflows and this file.
@@ -26,34 +27,39 @@ holds only the Containerfile, the workflows and this file.
 ## Deployment
 
 - **Port:** 8765 (same inside and outside the container, bound to 127.0.0.1)
-- **Env file:** `mcp-memory.env`, under `/srv/<service>/config/` for the
-  Streamable HTTP deployment or `~/.config/mcp-env/` for a local SSE instance
-- **Credentials:** CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
-  CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_VECTORIZE_INDEX (hybrid or cloudflare
-  backend), MCP_API_KEY (Streamable HTTP gate); backend chosen by
-  MCP_MEMORY_STORAGE_BACKEND
+- **Env file:** `mcp-memory.env`, delivered from the secret store to
+  `/run/srv-secrets/<service>/` for the Streamable HTTP deployment, or
+  `~/.config/mcp-env/` for a local SSE instance
+- **Credentials:** MCP_API_KEY (Streamable HTTP gate), and
+  MCP_SYNC_PEER_API_KEY where peer sync is configured; backend chosen by
+  MCP_MEMORY_STORAGE_BACKEND, which is `sqlite_vec` everywhere this image is
+  deployed
 
 The SQLite database lives in the `/app/sqlite_db` volume, bind-mounted from
 the host. Backups are the host's job (pbs stages it with `sqlite3 .backup`),
 so the in-app scheduler is off (`MCP_BACKUP_ENABLED=false`) and
 `/app/backups` is not a volume. The image holds the
 whole memory corpus at runtime, so telemetry is off
-(`HF_HUB_DISABLE_TELEMETRY`, `ORT_DISABLE_TELEMETRY`, `DO_NOT_TRACK`). One
-authoritative instance; Cloudflare is a backup, not a peer.
+(`HF_HUB_DISABLE_TELEMETRY`, `ORT_DISABLE_TELEMETRY`, `DO_NOT_TRACK`). The
+Cloudflare backends are no longer used anywhere: D1 and Vectorize were deleted
+and the token revoked in RT #1653.
 
 ## Patches
 
-One commit on the fork's `main` on top of upstream: the hybrid health check
-reports `cloudflare_sync: sync_failing` when the sync loop runs but Cloudflare
-is unreachable, and exposes `cloudflare_available` and `consecutive_failures`
-(crunchtools/memory#3, fatherlinux/mcp-memory-service#1). Re-apply it on every
-upstream rebase until upstream carries an equivalent fix.
+None. The one patch this image used to carry — the hybrid health check
+reporting `cloudflare_sync: sync_failing` when the sync loop runs but
+Cloudflare is unreachable (crunchtools/memory#3,
+fatherlinux/mcp-memory-service#1) — is in upstream verbatim as of v12.11.0,
+which is why the build no longer goes through the fork.
 
-The Containerfile carries one
-packaging workaround: a populated `/etc/machine-id` is baked into the
-runtime image because onnxruntime's telemetry falls back to `popen("blkid")`
-and segfaults on a shell-less image (onnxruntime#32173). An absent or empty
-file still crashes; keep it populated.
+The Containerfile carries two packaging workarounds. A populated
+`/etc/machine-id` is baked into the runtime image because onnxruntime's
+telemetry falls back to `popen("blkid")` and segfaults on a shell-less image
+(onnxruntime#32173); an absent or empty file still crashes, so keep it
+populated. And `MCP_MEMORY_BASE_DIR` is set explicitly to `/app/state`,
+created in the builder stage under the runtime user, because upstream derives
+that directory from `$HOME` — `/tmp` here — and `config/base.py` exits 1 when
+it cannot create it. Neither may be dropped without re-testing a real boot.
 
 ## Deviations
 
@@ -65,8 +71,23 @@ file still crashes; keep it populated.
   to Python 3.14, rather than `quay.io/hummingbird/python:latest`. The builder
   stage installs `libgomp` and `libstdc++`, which onnxruntime and numpy load,
   and the runtime copies them in.
-- **Unpinned source.** The build takes the fork's `main` rather than a tag,
-  so a rebuild can pick up upstream changes.
+- **Peer sync needs `--http`.** Upstream's HLC-based peer sync
+  (`storage/sync/`, `storage/remote_http.py` as the peer adapter) arrives with
+  v12.11.0 and is what RT #1655 builds the work/personal split on. Its
+  `/api/sync/*` control plane and its opt-in scheduler
+  (`MCP_SYNC_SCHEDULE`, ADR-0028) both live in the FastAPI app, and
+  `cli/main.py` starts that app only under `--http`; every other transport
+  runs the bare MCP server, where the endpoints 404 and the scheduler never
+  starts.
+
+  A syncing instance is therefore its own thing, not the fleet's MCP
+  endpoint. `--http` binds `MCP_HTTP_HOST` and `MCP_HTTP_PORT` (defaults
+  `127.0.0.1:8000`) and ignores `--sse-host`/`--sse-port` entirely, so both
+  must be set explicitly. It does mount an MCP router, but that is a
+  JSON-only shim pinned to protocol `2024-11-05` — not the Streamable HTTP
+  transport the fleet's gateway speaks. Fleet clients stay on
+  `--streamable-http`, which is what the deployed units pass and which does
+  not sync. The image's own default CMD is `--sse`.
 
 ## History
 
@@ -74,3 +95,4 @@ file still crashes; keep it populated.
 |---------|------|---------|
 | 1.0.0 | 2026-10-02 | Initial manifest under constitution v1.18.0 |
 | 1.0.1 | 2026-10-28 | Backups owned by the host; `/app/backups` volume dropped (RT #1537) |
+| 1.1.0 | 2026-11-18 | Built direct from upstream v12.11.0, fork retired, patches empty; Cloudflare credentials and topology claims removed (RT #1653, #1655) |
