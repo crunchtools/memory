@@ -47,6 +47,17 @@ RUN tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.seed
 # rather than relying on it surviving the USER 0 block.
 RUN chown -R 65532:0 /app
 
+# The Python packages install into /opt/memory, not pip's default user base.
+# The builder runs as 65532 with HOME=/tmp, so `pip install` falls back to a
+# --user install under $HOME/.local -- i.e. /tmp/.local, ~1.07 GB of it. The
+# runtime stage then carried that into /tmp, and the house
+# `Tmpfs=/tmp:rw,nosuid,size=256m` mounts over it: the container died at
+# create with "No space left on device" (#43). PYTHONUSERBASE moves the user
+# base out of /tmp in both stages; site.py honours it at runtime, so nothing
+# else changes. Needs root to create, so it lives here.
+RUN mkdir -p /opt/memory && chown 65532:0 /opt/memory
+ENV PYTHONUSERBASE=/opt/memory
+
 USER 65532
 
 # Download and extract upstream source at the pinned commit
@@ -109,7 +120,7 @@ COPY --from=builder /usr/lib64/libgomp.so* /usr/lib64/
 COPY --from=builder /usr/lib64/libstdc++.so* /usr/lib64/
 
 # Copy installed Python packages and app source
-COPY --from=builder /tmp/.local /tmp/.local
+COPY --from=builder /opt/memory /opt/memory
 COPY --from=builder /app /app
 
 # Keeps onnxruntime's telemetry off its shell-based fallback — see stage 1
@@ -117,10 +128,11 @@ COPY --from=builder /etc/machine-id.seed /etc/machine-id
 
 # MCP_MEMORY_BASE_DIR is set EXPLICITLY. Unset, config/base.py falls back to
 # $HOME/.local/share/mcp-memory, and HOME is /tmp here, so the base dir landed
-# inside /tmp/.local -- which this image creates for the pip --user install and
-# which belongs to root, mode 0755. That only ever worked because some
-# dependency's install happened to leave a 65532-owned /tmp/.local/share
-# behind; the 12.11.0 dependency set does not, and config/base.py calls
+# inside /tmp/.local -- which the image once created for the pip --user install
+# (it now lives in /opt/memory, see stage 1) and which belonged to root, mode
+# 0755. That only ever worked because some dependency's install happened to
+# leave a 65532-owned /tmp/.local/share behind; the 12.11.0 dependency set does
+# not, and config/base.py calls
 # sys.exit(1) when it cannot create the directory, so the server died at import
 # with "Fatal error initializing paths" (RT#1655). /app/state is owned by the
 # runtime user by construction and does not depend on HOME or on pip's layout.
@@ -128,7 +140,8 @@ COPY --from=builder /etc/machine-id.seed /etc/machine-id
 # consolidation archive, which were ephemeral before this change and stay so.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
-    PATH="/tmp/.local/bin:${PATH}" \
+    PYTHONUSERBASE=/opt/memory \
+    PATH="/opt/memory/bin:${PATH}" \
     MCP_MEMORY_BASE_DIR=/app/state \
     MCP_MEMORY_SQLITE_PATH=/app/sqlite_db/memory.db \
     MCP_MEMORY_BACKUPS_PATH=/app/backups \

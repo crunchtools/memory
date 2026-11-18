@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The Python packages now live in `/opt/memory` (`PYTHONUSERBASE`), not
+  `/tmp/.local`. The builder's pip fell back to a `--user` install under
+  `HOME=/tmp`, so the image carried ~1.07 GB in `/tmp`, and the house
+  `Tmpfs=/tmp:rw,nosuid,size=256m` made the container die at create with
+  "No space left on device" (#43). CI now boots the image under
+  `--tmpfs /tmp:size=256m` and requires `/api/health` to answer.
+
 ## [1.2.1] - 2026-11-18
 
 ### Fixed
