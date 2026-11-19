@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The container release runs constitution v1.51.0's `container-release.yml`
+  (was v1.46.0) and grants it `issues: write`, so a failed scheduled rebuild
+  opens an issue instead of only warning. A `v*` promote now also refuses an
+  image whose `version` label names a different release of this repo. This
+  image sets that label in the Containerfile and the release PR is what moves
+  it, as 1.2.1 and 1.2.2 did, so the check passes; a tag cut on a feature
+  merge is refused instead of shipping the way v1.2.0 did, labelled 1.1.2.
+
 ## [1.2.2] - 2026-11-18
 
 ### Fixed
