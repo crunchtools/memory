@@ -6,7 +6,12 @@ quadlets. The image once carried its ~1.07 GB of Python packages in
 /tmp/.local, so a tmpfs on /tmp hid them (#43). This starts the server,
 requires /api/health to answer, then stores a memory and finds it again by
 semantic search, so the embedding model really loads, and checks the model
-cache landed under HOME=/app/state while /tmp stayed small.
+cache sits under HOME=/app/state while /tmp stayed small.
+
+The model is baked into the image (#52) and this runs with no network, so
+/api/health/model must name the ONNX model rather than upstream's hash
+pseudo-embedding fallback: with one memory stored, a search over hash vectors
+would still find it.
 """
 
 import json
@@ -81,6 +86,10 @@ def check(log) -> None:
         if token not in found:
             sys.exit(f"search did not return the stored memory: {found}")
         print(f"search: found {token}")
+        model_health = api("health/model")
+        print(f"/api/health/model: {model_health}")
+        if "all-MiniLM-L6-v2" not in model_health or "__hash_fallback__" in model_health:
+            sys.exit("the embedding model did not load; the server fell back to hash vectors")
 
         home = pathlib.Path.home()
         cache = home / ".cache"

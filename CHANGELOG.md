@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- The embedding model (all-MiniLM-L6-v2 ONNX) is baked into the image at
+  build time, verified against upstream's pinned sha256, so the server no
+  longer downloads ~80 MB on its first store or search after every container
+  start, and the `contract` check runs with no network (#52).
 - Gatehouse triage receives the review job's result (`review_result`), so a PR whose review died before posting anything is held instead of passing.
 
 - Promote signs the image with the fleet cosign key (`sign: true`), because
