@@ -5,6 +5,7 @@ import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -53,6 +54,20 @@ class TmpfsHealthErrors(unittest.TestCase):
             msg = tmpfs_health.wait_healthy(_Running())
         self.assertIn("401", msg)
         self.assertIn("stub body", msg)
+
+    def test_wait_healthy_retries_503_then_times_out(self) -> None:
+        # monotonic: deadline calc, then one in-time check, then past the deadline.
+        clock = iter([0, 1, tmpfs_health.TIMEOUT + 1])
+        with _Server(503) as port:
+            tmpfs_health.PORT = port
+            with (
+                mock.patch.object(tmpfs_health.time, "monotonic", lambda: next(clock)),
+                mock.patch.object(tmpfs_health.time, "sleep") as sleep,
+            ):
+                msg = tmpfs_health.wait_healthy(_Running())
+        sleep.assert_called_once_with(3)
+        self.assertIn(f"did not answer within {tmpfs_health.TIMEOUT}s", msg)
+        self.assertIn("503", msg)
 
 
 if __name__ == "__main__":
