@@ -14,11 +14,12 @@ checks = ["contract"]
 
 # The contract test, run inside the image this run built: the HTTP API answers
 # with /tmp a tmpfs, and a store and a semantic search work, so the embedding
-# model loads (#43). The network fetches that model. sdlc's image job does not
-# run contract-test (crunchtools/sdlc#118), so it is a check that does.
+# model loads (#43). The model is baked into the image (#52), so the check runs
+# with no network, and MCP_MEMORY_ONNX_ALLOW_DOWNLOAD=0 makes a missing model a
+# plain error rather than a fetch. sdlc's image job does not run contract-test
+# (crunchtools/sdlc#118), so it is a check that does.
 [tool.sdlc.ci.contract]
 kind = "command"
 image = "localhost/memory:sdlc"
 argv = ["python3.14", "-I", "tests/container/tmpfs_health.py"]
-env = { HOME = "/app/state", PYTHONPYCACHEPREFIX = "/app/state/pycache" }
-network = true
+env = { HOME = "/app/state", PYTHONPYCACHEPREFIX = "/app/state/pycache", MCP_MEMORY_ONNX_ALLOW_DOWNLOAD = "0" }

@@ -96,6 +96,28 @@ RUN pip3.14 install --no-cache-dir --no-deps torch==2.15.0 \
 # already installed, locked, above.
 RUN pip3.14 install --no-cache-dir --no-deps -e ".[sqlite]"
 
+# Bake the embedding model in, so neither the contract check (C7: no live
+# calls in CI, #52) nor a production start downloads it. Upstream's default
+# ONNX path fetches this tarball on the first store/search and skips the fetch
+# when <HOME>/.cache/mcp_memory/onnx_models/all-MiniLM-L6-v2/onnx/model.onnx
+# already exists (embeddings/onnx_embeddings.py), so extracting it there under
+# stage 2's HOME=/app/state is all it takes. The hash is checked twice: against
+# the download, and against upstream's own _MODEL_SHA256, so an UPSTREAM_COMMIT
+# bump that moves the model fails here instead of silently downloading at
+# runtime. The tarball itself is dropped: upstream never reads it once
+# model.onnx is extracted.
+ARG ONNX_MODEL_URL=https://chroma-onnx-models.s3.amazonaws.com/all-MiniLM-L6-v2/onnx.tar.gz
+ARG ONNX_MODEL_SHA256=913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3
+RUN grep -q "_MODEL_SHA256 = \"${ONNX_MODEL_SHA256}\"" \
+      src/mcp_memory_service/embeddings/onnx_embeddings.py && \
+    dir=/app/state/.cache/mcp_memory/onnx_models/all-MiniLM-L6-v2 && \
+    mkdir -p "$dir" && \
+    curl -fsSL -o "$dir/onnx.tar.gz" "${ONNX_MODEL_URL}" && \
+    echo "${ONNX_MODEL_SHA256}  $dir/onnx.tar.gz" | sha256sum -c - && \
+    tar xzf "$dir/onnx.tar.gz" -C "$dir" && \
+    rm "$dir/onnx.tar.gz" && \
+    test -f "$dir/onnx/model.onnx"
+
 # /app/state backs MCP_MEMORY_BASE_DIR and HOME (set in stage 2). Created here, under
 # the /app that is chowned to 65532 above, because stage 2 is distroless and
 # cannot RUN mkdir; `COPY --from=builder /app /app` carries it and its
@@ -141,8 +163,9 @@ COPY --from=builder /etc/machine-id.seed /etc/machine-id
 # 256m /tmp tmpfs, and a Hugging Face fallback download could overflow it
 # (#43). /app/state keeps it on the container's own layer.
 #
-# /app/state is deliberately NOT a volume: the model cache and the archive were
-# ephemeral before and stay so.
+# /app/state is deliberately NOT a volume. The archive is ephemeral; the
+# embedding model is baked into it at build time (stage 1), so it is part of
+# the image rather than a download on every container start (#52).
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     PYTHONUSERBASE=/opt/memory \

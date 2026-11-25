@@ -6,7 +6,12 @@ quadlets. The image once carried its ~1.07 GB of Python packages in
 /tmp/.local, so a tmpfs on /tmp hid them (#43). This starts the server,
 requires /api/health to answer, then stores a memory and finds it again by
 semantic search, so the embedding model really loads, and checks the model
-cache landed under HOME=/app/state while /tmp stayed small.
+cache sits under HOME=/app/state while /tmp stayed small.
+
+The model is baked into the image (#52) and this runs with no network, so
+/api/health/model must name the ONNX model rather than upstream's hash
+pseudo-embedding fallback: with one memory stored, a search over hash vectors
+would still find it.
 """
 
 import json
@@ -19,7 +24,14 @@ import time
 import urllib.error
 import urllib.request
 
-TIMEOUT = int(os.environ.get("TIMEOUT", "240"))
+TIMEOUT = 240  # seconds; matches boot-timeout in sdlc.toml
+SHUTDOWN_TIMEOUT = 30  # seconds
+MIB = 1 << 20
+TMP_LIMIT = 32 * MIB
+
+
+class ContractFailure(Exception):
+    """The image broke the contract; the message says how."""
 PORT = 8000
 KEY = "contract-test-dummy-key"
 BASE = f"http://127.0.0.1:{PORT}/api"
@@ -51,17 +63,17 @@ def check(log) -> None:
         deadline = time.monotonic() + TIMEOUT
         while True:
             if server.poll() is not None:
-                sys.exit("server exited before answering /api/health")
+                raise ContractFailure("server exited before answering /api/health")
             try:
                 body = api("health")
                 break
             except (urllib.error.URLError, OSError):
                 if time.monotonic() >= deadline:
-                    sys.exit(f"/api/health did not answer within {TIMEOUT}s")
+                    raise ContractFailure(f"/api/health did not answer within {TIMEOUT}s")
                 time.sleep(3)
         print(f"/api/health: {body}")
         if '"healthy"' not in body:
-            sys.exit("/api/health is not healthy")
+            raise ContractFailure("/api/health is not healthy")
 
         token = f"tmpfs-contract-{os.getpid()}-{time.time_ns()}"
         stored = api(
@@ -73,27 +85,31 @@ def check(log) -> None:
         )
         print(f"store: {stored}")
         if json.loads(stored).get("success") is not True:
-            sys.exit("store did not succeed")
+            raise ContractFailure("store did not succeed")
         found = api(
             "search",
             {"query": "contract test memory about tmpfs hiding the model", "n_results": 5},
         )
         if token not in found:
-            sys.exit(f"search did not return the stored memory: {found}")
+            raise ContractFailure(f"search did not return the stored memory: {found}")
         print(f"search: found {token}")
+        model_health = api("health/model")
+        print(f"/api/health/model: {model_health}")
+        if "all-MiniLM-L6-v2" not in model_health or "__hash_fallback__" in model_health:
+            raise ContractFailure("the embedding model did not load; the server fell back to hash vectors")
 
         home = pathlib.Path.home()
         cache = home / ".cache"
         model = sum(f.stat().st_size for f in cache.rglob("*") if f.is_file()) if cache.is_dir() else 0
         st = os.statvfs("/tmp")
         tmp_used = (st.f_blocks - st.f_bfree) * st.f_frsize
-        print(f"HOME={home} cache={model >> 20} MiB /tmp used={tmp_used >> 20} MiB")
-        if str(home) != "/app/state" or model == 0 or tmp_used >= 32 << 20:
-            sys.exit("model cache is not under HOME=/app/state, or /tmp grew")
+        print(f"HOME={home} cache={model // MIB} MiB /tmp used={tmp_used // MIB} MiB")
+        if str(home) != "/app/state" or model == 0 or tmp_used >= TMP_LIMIT:
+            raise ContractFailure("model cache is not under HOME=/app/state, or /tmp grew")
     finally:
         server.terminate()
         try:
-            server.wait(timeout=30)
+            server.wait(timeout=SHUTDOWN_TIMEOUT)
         except subprocess.TimeoutExpired:
             server.kill()
 
@@ -103,7 +119,9 @@ if __name__ == "__main__":
     with tempfile.TemporaryFile(mode="w+", dir=pathlib.Path.home()) as log:
         try:
             check(log)
-        except BaseException:
+        except BaseException as exc:
             log.seek(0)
             print("".join(log.readlines()[-40:]), file=sys.stderr)
+            if isinstance(exc, ContractFailure):
+                sys.exit(str(exc))
             raise
