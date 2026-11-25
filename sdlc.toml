@@ -8,4 +8,17 @@ boot = "mcp"
 boot-cmd = "--storage-backend sqlite_vec"
 boot-timeout = 240
 boot-run-args = "--tmpfs /tmp:rw,nosuid,size=256m"
-contract-test = "tests/container/tmpfs_health.sh"
+
+[tool.sdlc.ci]
+checks = ["contract"]
+
+# The contract test, run inside the image this run built: the HTTP API answers
+# with /tmp a tmpfs, and a store and a semantic search work, so the embedding
+# model loads (#43). The network fetches that model. sdlc's image job does not
+# run contract-test (crunchtools/sdlc#118), so it is a check that does.
+[tool.sdlc.ci.contract]
+kind = "command"
+image = "localhost/memory:sdlc"
+argv = ["python3.14", "-I", "tests/container/tmpfs_health.py"]
+env = { HOME = "/app/state", PYTHONPYCACHEPREFIX = "/app/state/pycache" }
+network = true
