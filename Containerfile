@@ -61,7 +61,7 @@ ENV PYTHONUSERBASE=/opt/memory
 USER 65532
 
 # Download and extract upstream source at the pinned commit
-RUN curl -sL https://github.com/doobidoo/mcp-memory-service/archive/${UPSTREAM_COMMIT}.tar.gz \
+RUN curl -fsSL https://github.com/doobidoo/mcp-memory-service/archive/${UPSTREAM_COMMIT}.tar.gz \
     | tar xz --strip-components=1 -C /app
 
 # Export upstream's committed uv.lock for the sqlite extra and install that
