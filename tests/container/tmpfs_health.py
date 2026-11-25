@@ -38,6 +38,7 @@ class HTTPStatusError(http.client.HTTPException):
 
     def __init__(self, path: str, status: int, body: str) -> None:
         super().__init__(f"/api/{path} answered {status}: {body}")
+        self.status = status
 
 
 def api(path: str, body: dict | None = None) -> str:
@@ -51,7 +52,7 @@ def api(path: str, body: dict | None = None) -> str:
         )
         resp = conn.getresponse()
         text = resp.read().decode()
-        if not HTTPStatus(resp.status).is_success:
+        if not 200 <= resp.status < 300:
             raise HTTPStatusError(path, resp.status, text)
         return text
     finally:
@@ -66,7 +67,13 @@ def wait_healthy(server: subprocess.Popen) -> str | None:
         try:
             body = api("health")
             break
-        except (OSError, http.client.HTTPException):
+        except HTTPStatusError as err:
+            if err.status != HTTPStatus.SERVICE_UNAVAILABLE:
+                return str(err)
+            if time.monotonic() >= deadline:
+                return f"/api/health did not answer within {TIMEOUT}s: {err}"
+            time.sleep(3)
+        except OSError, http.client.HTTPException:
             if time.monotonic() >= deadline:
                 return f"/api/health did not answer within {TIMEOUT}s"
             time.sleep(3)
@@ -122,9 +129,15 @@ def check(log) -> str | None:
     """Return the first way the image broke the contract, or None."""
     server = subprocess.Popen(
         [
-            "/usr/bin/python3.14", "-m", "mcp_memory_service.cli.main", "server",
-            "--http", "--http-host", "127.0.0.1",
-            "--storage-backend", "sqlite_vec",
+            "/usr/bin/python3.14",
+            "-m",
+            "mcp_memory_service.cli.main",
+            "server",
+            "--http",
+            "--http-host",
+            "127.0.0.1",
+            "--storage-backend",
+            "sqlite_vec",
         ],
         # The port goes by env rather than --http-port, so PORT is its one source.
         env={**os.environ, "MCP_API_KEY": KEY, "MCP_HTTP_PORT": str(PORT)},
