@@ -1,8 +1,12 @@
 [tool.sdlc]
 repo-kinds = ["forked-mcp-server"]
+# This file exists for ruff and for sdlc, not for a package: the image is
+# built from upstream's source, and tests/container/*.py are scripts, linted
+# by the ruff-check hook. Without this, a pyproject.toml makes sdlc run the
+# python stack instead of the container one.
+skip-stacks = ["python"]
 
 [tool.sdlc.image]
-# Written by crunchtools/sdlc's scripts/convert_repo.py: moved from the workflows.
 image = "quay.io/crunchtools/memory"
 boot = "mcp"
 boot-cmd = "--storage-backend sqlite_vec"
@@ -23,3 +27,21 @@ kind = "command"
 image = "localhost/memory:sdlc"
 argv = ["python3.14", "-I", "tests/container/tmpfs_health.py"]
 env = { HOME = "/app/state", PYTHONPYCACHEPREFIX = "/app/state/pycache", MCP_MEMORY_ONNX_ALLOW_DOWNLOAD = "0" }
+
+[tool.ruff]
+line-length = 100
+# The Python the sdlc image runs tests/container/*.py with, and the ruff
+# hook's rev matches the version that image bakes.
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "S", "B", "C4", "C901", "DTZ", "PIE", "PT",
+          "RET", "SIM", "TID", "ARG", "PLC", "PLE", "PLR", "PLW", "TRY", "RUF"]
+
+# Gourmand's IF001 requires explicit thresholds, matched to the fleet's.
+[tool.ruff.lint.pylint]
+max-branches = 10
+max-statements = 50
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10

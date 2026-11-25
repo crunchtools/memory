@@ -6,7 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- The upstream source tarball is fetched with `curl -f` and verified against
+  a pinned sha256 before it is extracted, so an HTTP error page or a changed
+  archive fails the build instead of becoming the image (#56).
+
 ### Changed
+- `sdlc.toml` is folded into `pyproject.toml`, which also carries the ruff
+  configuration, and a pinned `ruff-check` pre-commit hook lints the test
+  scripts, so gourmand's IF001 passes (#55). `sdlc tiers` is unchanged.
 - The embedding model (all-MiniLM-L6-v2 ONNX) is baked into the image at
   build time, verified against upstream's pinned sha256, so the server no
   longer downloads ~80 MB on its first store or search after every container

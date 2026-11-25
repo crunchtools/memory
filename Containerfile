@@ -20,6 +20,11 @@ WORKDIR /app
 # (RT#1655).
 # https://github.com/doobidoo/mcp-memory-service/releases/tag/v12.11.0
 ARG UPSTREAM_COMMIT=112d881c03268fe791d3a7f3d5e277cbe56174b2
+# sha256 of GitHub's archive of UPSTREAM_COMMIT, checked before extracting
+# (#56). Bump it together with UPSTREAM_COMMIT. GitHub does not promise
+# byte-stable archives; if a rebuild fails here with the commit unchanged,
+# re-fetch and compare the contents before re-pinning.
+ARG UPSTREAM_SHA256=c65415223eb00807762503871cae2a4a4bf79a746a05216275468687cb5174a6
 
 # Install native libs needed by onnxruntime (libgomp) and numpy (libstdc++),
 # and uv to export upstream's lock. Both run as root so `uv` lands in
@@ -60,9 +65,13 @@ ENV PYTHONUSERBASE=/opt/memory
 
 USER 65532
 
-# Download and extract upstream source at the pinned commit
-RUN curl -fsSL https://github.com/doobidoo/mcp-memory-service/archive/${UPSTREAM_COMMIT}.tar.gz \
-    | tar xz --strip-components=1 -C /app
+# Download upstream source at the pinned commit, verify it, then extract. -f
+# fails the build on an HTTP error instead of piping an error page into tar.
+RUN curl -fsSL -o /tmp/upstream.tar.gz \
+      https://github.com/doobidoo/mcp-memory-service/archive/${UPSTREAM_COMMIT}.tar.gz && \
+    echo "${UPSTREAM_SHA256}  /tmp/upstream.tar.gz" | sha256sum -c - && \
+    tar xzf /tmp/upstream.tar.gz --strip-components=1 -C /app && \
+    rm /tmp/upstream.tar.gz
 
 # Export upstream's committed uv.lock for the sqlite extra and install that
 # exact, hash-locked set with --no-deps -- no fresh resolve, no drift.
