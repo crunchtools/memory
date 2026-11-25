@@ -22,14 +22,22 @@ import subprocess
 import sys
 import tempfile
 import time
+from http import HTTPStatus
 
 TIMEOUT = 240  # seconds; matches boot-timeout in pyproject.toml
 SHUTDOWN_TIMEOUT = 30  # seconds
 MIB = 1 << 20
 TMP_LIMIT = 32 * MIB
-PORT = 8000  # the server's argv in check() names it too
+PORT = 8000
 KEY = "contract-test-dummy-key"
 MODEL = "all-MiniLM-L6-v2"
+
+
+class HTTPStatusError(http.client.HTTPException):
+    """The API answered with a non-2xx status."""
+
+    def __init__(self, path: str, status: int, body: str) -> None:
+        super().__init__(f"/api/{path} answered {status}: {body}")
 
 
 def api(path: str, body: dict | None = None) -> str:
@@ -41,7 +49,11 @@ def api(path: str, body: dict | None = None) -> str:
             body=None if body is None else json.dumps(body),
             headers={"X-API-Key": KEY, "Content-Type": "application/json"},
         )
-        return conn.getresponse().read().decode()
+        resp = conn.getresponse()
+        text = resp.read().decode()
+        if not HTTPStatus(resp.status).is_success:
+            raise HTTPStatusError(path, resp.status, text)
+        return text
     finally:
         conn.close()
 
@@ -111,10 +123,11 @@ def check(log) -> str | None:
     server = subprocess.Popen(
         [
             "/usr/bin/python3.14", "-m", "mcp_memory_service.cli.main", "server",
-            "--http", "--http-host", "127.0.0.1", "--http-port", "8000",
+            "--http", "--http-host", "127.0.0.1",
             "--storage-backend", "sqlite_vec",
         ],
-        env={**os.environ, "MCP_API_KEY": KEY},
+        # The port goes by env rather than --http-port, so PORT is its one source.
+        env={**os.environ, "MCP_API_KEY": KEY, "MCP_HTTP_PORT": str(PORT)},
         stdout=log,
         stderr=subprocess.STDOUT,
     )
